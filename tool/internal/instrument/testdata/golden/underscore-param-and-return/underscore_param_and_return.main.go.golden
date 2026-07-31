@@ -6,9 +6,9 @@ package main
 import _ "unsafe"
 
 // Blank param + blank named return, the collision case from issue #736.
-func UnderscoreParamReturnFunc(_ignoredParam0 int) (_ignoredRetVal0 error) {
+func UnderscoreParamReturnFunc(_ignoredParam0_1353090234 int) (_ignoredRetVal0 error) {
 	//line <generated>:1
-	if hookContext1353090234, _ := OtelBeforeTrampoline_UnderscoreParamReturnFunc1353090234(&_ignoredParam0); false {
+	if hookContext1353090234, _ := OtelBeforeTrampoline_UnderscoreParamReturnFunc1353090234(&_ignoredParam0_1353090234); false {
 	} else {
 		defer OtelAfterTrampoline_UnderscoreParamReturnFunc1353090234(hookContext1353090234, &_ignoredRetVal0)
 	}

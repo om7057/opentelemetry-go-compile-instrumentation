@@ -43,6 +43,12 @@ func Target(value string) error { return nil }
 	assert.Contains(t, err.Error(), "can not find function Target")
 }
 
+// testIdentity stands in for InstFuncRule.Identity() in tests that call
+// collectArguments directly. Its only requirement is being a valid Go
+// identifier fragment; the real value is always a CRC32 digest (see
+// InstFuncRule.Identity), a plain word is easier to read in expectations.
+const testIdentity = "id"
+
 func TestCollectArguments(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -62,7 +68,7 @@ func TestCollectArguments(t *testing.T) {
 		{
 			name:     "unnamed params (len(Names) == 0)",
 			src:      "package main\nfunc F(int, string) {}",
-			expected: []string{"_ignoredParam0", "_ignoredParam1"},
+			expected: []string{"_ignoredParam0_id", "_ignoredParam1_id"},
 		},
 		{
 			name:     "mixed named and unnamed params via group",
@@ -72,7 +78,7 @@ func TestCollectArguments(t *testing.T) {
 		{
 			name:     "underscore params",
 			src:      "package main\nfunc F(_ int, _ string) {}",
-			expected: []string{"_ignoredParam0", "_ignoredParam1"},
+			expected: []string{"_ignoredParam0_id", "_ignoredParam1_id"},
 		},
 		{
 			name:     "named receiver",
@@ -82,12 +88,12 @@ func TestCollectArguments(t *testing.T) {
 		{
 			name:     "unnamed receiver",
 			src:      "package main\ntype T struct{}\nfunc (T) F() {}",
-			expected: []string{"_ignoredParam0"},
+			expected: []string{"_ignoredParam0_id"},
 		},
 		{
 			name:     "underscore receiver",
 			src:      "package main\ntype T struct{}\nfunc (_ T) F() {}",
-			expected: []string{"_ignoredParam0"},
+			expected: []string{"_ignoredParam0_id"},
 		},
 		{
 			name:     "named receiver with params",
@@ -97,14 +103,36 @@ func TestCollectArguments(t *testing.T) {
 		{
 			name:     "unnamed receiver with unnamed params",
 			src:      "package main\ntype T struct{}\nfunc (T) F(int, string) {}",
-			expected: []string{"_ignoredParam0", "_ignoredParam1", "_ignoredParam2"},
+			expected: []string{"_ignoredParam0_id", "_ignoredParam1_id", "_ignoredParam2_id"},
+		},
+		{
+			// The target already declares the exact name the receiver would
+			// get, so the generated one has to skip past it.
+			name:     "blank receiver colliding with a declared param",
+			src:      "package main\ntype T struct{}\nfunc (_ T) F(_ignoredParam0_id int) {}",
+			expected: []string{"_ignoredParam1_id", "_ignoredParam0_id"},
+		},
+		{
+			name:     "unnamed receiver colliding with a declared param",
+			src:      "package main\ntype T struct{}\nfunc (T) F(_ignoredParam0_id int) {}",
+			expected: []string{"_ignoredParam1_id", "_ignoredParam0_id"},
+		},
+		{
+			name:     "blank param colliding with a declared param",
+			src:      "package main\nfunc F(_ int, _ignoredParam0_id string) {}",
+			expected: []string{"_ignoredParam1_id", "_ignoredParam0_id"},
+		},
+		{
+			name:     "blank receiver colliding with a declared return",
+			src:      "package main\ntype T struct{}\nfunc (_ T) F() (_ignoredParam0_id error) { return nil }",
+			expected: []string{"_ignoredParam1_id"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			funcDecl := parseFunc(t, tt.src)
-			args := collectArguments(funcDecl)
+			args := collectArguments(funcDecl, testIdentity)
 			assert.Equal(t, tt.expected, args)
 		})
 	}
@@ -178,6 +206,18 @@ func TestCollectNamesNoCollision(t *testing.T) {
 			name: "multiple blanks on both sides",
 			src:  "package main\nfunc F(_ int, _ string) (_ error, _ bool) { return nil, false }",
 		},
+		{
+			// A target may already use the generated prefix itself. The
+			// emitted signature must still declare every binding exactly
+			// once even when it collides with what would otherwise be
+			// generated.
+			name: "blank receiver and a declared _ignoredParam0_id",
+			src:  "package main\ntype T struct{}\nfunc (_ T) M(_ignoredParam0_id int) (_ error) { return nil }",
+		},
+		{
+			name: "blank param and a declared _ignoredParam0_id",
+			src:  "package main\nfunc F(_ int, _ignoredParam0_id string) (_ error) { return nil }",
+		},
 	}
 
 	for _, tt := range tests {
@@ -186,7 +226,7 @@ func TestCollectNamesNoCollision(t *testing.T) {
 
 			// Mirror insertTJump: returns are collected first, then arguments.
 			retVals := collectReturnValues(funcDecl)
-			args := collectArguments(funcDecl)
+			args := collectArguments(funcDecl, testIdentity)
 
 			seen := make(map[string]struct{})
 			for _, name := range append(append([]string{}, retVals...), args...) {

@@ -82,9 +82,62 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []string {
 	return retVals
 }
 
-func collectArguments(funcDecl *dst.FuncDecl) []string {
+// declaredNames returns the identifiers the user already wrote in the
+// function signature. Generated names must avoid them: nothing stops a
+// target from declaring a parameter that happens to match a generated name,
+// and reusing it would emit a signature with two bindings of the same name.
+//
+// This only sees what the signature itself declares. It cannot see other
+// identifiers declared elsewhere in the target's package, which is what the
+// identity suffix in collectArguments is for.
+func declaredNames(funcDecl *dst.FuncDecl) map[string]struct{} {
+	names := make(map[string]struct{})
+	collect := func(fields *dst.FieldList) {
+		if fields == nil {
+			return
+		}
+		for _, field := range fields.List {
+			for _, name := range field.Names {
+				if name.Name != ast.IdentIgnore {
+					names[name.Name] = struct{}{}
+				}
+			}
+		}
+	}
+	collect(funcDecl.Recv)
+	collect(funcDecl.Type.Params)
+	collect(funcDecl.Type.Results)
+	return names
+}
+
+// collectArguments collects the target function's argument names, generating
+// one for every unnamed or blank binding (receiver included) so their
+// addresses can be taken during trampoline generation.
+//
+// identity is the applying rule's InstFuncRule.Identity(), the same
+// content-derived key makeName uses for trampoline function names. Folding it
+// into every generated name is what makes an accidental collision with a
+// target's declarations implausible: declaredNames only catches an exact
+// match within this one signature, but a target can declare identifiers
+// anywhere in its package that this function has no visibility into, and a
+// bare counter like _ignoredParam0 is exactly the kind of name a target might
+// plausibly write by hand.
+func collectArguments(funcDecl *dst.FuncDecl, identity string) []string {
 	args := make([]string, 0)
 	idx := 0
+	taken := declaredNames(funcDecl)
+	// nextName hands out the next generated name the target does not already
+	// declare, so even a target that hand-writes a name we would have
+	// generated can't collide with it.
+	nextName := func() string {
+		for {
+			name := fmt.Sprintf("%s%d_%s", ignoredParam, idx, identity)
+			idx++
+			if _, dup := taken[name]; !dup {
+				return name
+			}
+		}
+	}
 	if ast.HasReceiver(funcDecl) {
 		if recv := funcDecl.Recv.List[0]; recv.Names != nil {
 			// Named receiver, e.g. func (r R) F() {} or func (_ R) F() {}
@@ -94,15 +147,13 @@ func collectArguments(funcDecl *dst.FuncDecl) []string {
 				// so it falls into this branch, but "_" cannot have its
 				// address taken during trampoline generation the way a named
 				// receiver can. Assign it a generated name instead.
-				receiver = fmt.Sprintf("%s%d", ignoredParam, idx)
-				idx++
+				receiver = nextName()
 				recv.Names[0].Name = receiver
 			}
 			args = append(args, receiver)
 		} else {
 			// Unnamed receiver, e.g. func (R) F() {}
-			receiver := fmt.Sprintf("%s%d", ignoredParam, idx)
-			idx++
+			receiver := nextName()
 			funcDecl.Recv.List[0].Names = []*dst.Ident{ast.Ident(receiver)}
 			args = append(args, receiver)
 		}
@@ -112,16 +163,14 @@ func collectArguments(funcDecl *dst.FuncDecl) []string {
 		if field.Names == nil {
 			// Unnamed Parameters, e.g. func(int, string){}
 			// Assign a name for these parameters and collect it then
-			name := fmt.Sprintf("%s%d", ignoredParam, idx)
+			name := nextName()
 			field.Names = []*dst.Ident{ast.Ident(name)}
-			idx++
 			args = append(args, name)
 		} else {
 			// Named Parameters, e.g. func(a int, b string){}
 			for _, name := range field.Names {
 				if name.Name == ast.IdentIgnore {
-					name.Name = fmt.Sprintf("%s%d", ignoredParam, idx)
-					idx++
+					name.Name = nextName()
 				}
 				args = append(args, name.Name)
 			}
@@ -228,7 +277,7 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 	retVals := collectReturnValues(funcDecl)
 
 	// Collect all arguments from target function, including the receiver
-	args := collectArguments(funcDecl)
+	args := collectArguments(funcDecl, t.Identity())
 
 	// Generate the trampoline-jump-if. The trampoline-jump-if is a conditional
 	// jump that jumps to the trampoline function, it looks something like this

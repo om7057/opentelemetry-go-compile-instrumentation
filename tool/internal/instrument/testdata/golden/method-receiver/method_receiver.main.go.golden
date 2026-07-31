@@ -17,9 +17,9 @@ func (t *T) Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 e
 	return 0.0, nil
 }
 
-func (_ignoredParam0 T) Func3() {
+func (_ignoredParam0_1380706877 T) Func3() {
 	//line <generated>:1
-	if OtelBeforeTrampoline_Func31380706877(&_ignoredParam0); false {
+	if OtelBeforeTrampoline_Func31380706877(&_ignoredParam0_1380706877); false {
 	} else {
 	}
 	//line main.go:12:18

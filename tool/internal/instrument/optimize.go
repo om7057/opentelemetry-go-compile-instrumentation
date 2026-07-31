@@ -127,7 +127,7 @@ func newHookContextImpl(tjump *TJump) dst.Expr {
 
 	// Build params slice: []interface{}{&param1, &param2, ...}
 	// Use createHookArgs to handle underscore parameters correctly
-	paramNames := collectArguments(targetFunc)
+	paramNames := collectArguments(targetFunc, tjump.rule.Identity())
 	paramExprs := createTrampArgs(paramNames)
 	paramsSlice := ast.CompositeLit(
 		ast.ArrayType(ast.InterfaceType()),
